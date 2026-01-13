@@ -1,0 +1,183 @@
+name,description,query,id,parentId,isFolder
+Untitled CypherMATCH (n:customer) RETURN n LIMIT 25;,,MATCH (n:customer) RETURN n LIMIT 25;,0,,false
+"Clean names, emails, phones, and cities",,"// Clean names, emails, phones, and cities
+MATCH (c:customer)
+SET c.name_norm = toLower(trim(c.Customer_Name)),
+    c.email_norm = toLower(trim(c.Email)),
+    c.phone_norm = apoc.text.replace(coalesce(c.Phone,''),'[^0-9]',''),
+    c.city_norm = toLower(trim(c.City));
+",1,,false
+create index,,"CREATE INDEX customer_phone_index IF NOT EXISTS FOR (c:customer) ON (c.phone_norm);
+CREATE INDEX customer_email_index IF NOT EXISTS FOR (c:customer) ON (c.email_norm);
+CREATE INDEX customer_name_index IF NOT EXISTS FOR (c:customer) ON (c.name_norm);
+",2,,false
+Match_Email-4,,"// Create fuzzy email match edges (blocking + inverted similarity logic)
+MATCH (c:customer)
+WHERE c.email_norm IS NOT NULL AND trim(c.email_norm) <> ''
+WITH substring(c.email_norm, 0, 1) AS firstChar, collect(c) AS group
+WHERE size(group) > 1
+UNWIND group AS a
+UNWIND group AS b
+WITH a, b, apoc.text.jaroWinklerDistance(a.email_norm, b.email_norm) AS sim
+WHERE elementId(a) < elementId(b)
+  AND sim <= 0.15   // smaller = more similar
+MERGE (a)-[:MATCH_EMAIL4 {similarity: sim}]->(b);
+
+",3,,false
+View top email similarity pairs across all customers,,"// View top email similarity pairs across all customers
+MATCH (a:customer)
+WHERE a.email_norm IS NOT NULL AND trim(a.email_norm) <> ''
+MATCH (b:customer)
+WHERE elementId(a) < elementId(b)
+  AND b.email_norm IS NOT NULL AND trim(b.email_norm) <> ''
+WITH a, b, apoc.text.jaroWinklerDistance(a.email_norm, b.email_norm) AS sim
+RETURN 
+  a.email_norm AS EmailA, 
+  b.email_norm AS EmailB, 
+  sim
+ORDER BY sim ASC
+// LIMIT 20;
+
+",4,,false
+view martch_Email-4,,"MATCH p=()-[:MATCH_EMAIL4]->() RETURN p ",5,,false
+match_Phone,,"// Link customers that share the same normalized phone
+MATCH (c:customer)
+WHERE c.phone_norm IS NOT NULL AND c.phone_norm <> ''
+WITH c.phone_norm AS phone, collect(c) AS customers
+WHERE size(customers) > 1
+UNWIND customers AS a
+UNWIND customers AS b
+WITH a, b
+WHERE elementId(a) < elementId(b)
+MERGE (a)-[:MATCH_PHONE]->(b);
+",6,,false
+view match_phone,,MATCH p=()-[:MATCH_PHONE]->() RETURN p LIMIT 25;,7,,false
+view match_Email4 with similarity index,,"MATCH (a:customer)-[r:MATCH_EMAIL4]->(b:customer)
+RETURN a.email_norm, b.email_norm, r.similarity
+ORDER BY r.similarity DESC
+// LIMIT 10;
+
+",8,,false
+view 2 customer table with their names mapped,,"MATCH (c:customer)
+RETURN c.Customer_Name, c.name_norm
+LIMIT 10;
+",9,,false
+view names of customer with similarityindex,,"MATCH (a:customer)
+WHERE a.name_norm IS NOT NULL
+MATCH (b:customer)
+WHERE elementId(a) < elementId(b)
+WITH a,b, apoc.text.jaroWinklerDistance(a.name_norm, b.name_norm) AS sim
+RETURN a.Customer_Name, b.Customer_Name, sim
+ORDER BY sim DESC
+LIMIT 20;
+",10,,false
+same thing as above,,"MATCH (c:customer)
+WHERE c.name_norm IS NOT NULL AND trim(c.name_norm) <> ''
+WITH substring(c.name_norm, 0, 1) AS firstChar, collect(c) AS group
+WHERE size(group) > 1
+UNWIND group AS a
+UNWIND group AS b
+WITH a,b, apoc.text.jaroWinklerDistance(a.name_norm, b.name_norm) AS sim
+RETURN a.Customer_Name, b.Customer_Name, sim
+// WHERE sim <= 0.15
+ORDER BY sim ASC
+LIMIT 20;
+",11,,false
+formation MATCH_NAME3,,"MATCH (a:customer)
+WHERE a.name_norm IS NOT NULL AND trim(a.name_norm) <> ''
+MATCH (b:customer)
+WHERE elementId(a) < elementId(b)
+  AND b.name_norm IS NOT NULL
+  AND trim(b.name_norm) <> ''
+WITH a, b, apoc.text.jaroWinklerDistance(a.name_norm, b.name_norm) AS sim
+WHERE sim <= 0.25
+MERGE (a)-[:MATCH_NAME3 {similarity: sim}]->(b);",12,,false
+view match_name3,,MATCH p=()-[:MATCH_NAME3]->() RETURN p LIMIT 25;,13,,false
+view mathc_name3 after query,,"MATCH (a:customer)-[r:MATCH_NAME3]->(b:customer)
+RETURN a.Customer_Name, b.Customer_Name, r.similarity
+ORDER BY r.similarity DESC
+// LIMIT 20;
+",14,,false
+see the similarity score of all,,"MATCH (a:customer)-[r]-(b:customer)
+WHERE elementId(a) < elementId(b)
+WITH a, b,
+     CASE WHEN exists((a)-[:MATCH_PHONE]->(b)) THEN 1.0 ELSE 0.0 END AS phone,
+     coalesce(1 - min(CASE WHEN type(r)='MATCH_EMAIL4' THEN r.similarity ELSE 1 END), 0) AS emailScore,
+     coalesce(1 - min(CASE WHEN type(r)='MATCH_NAME3' THEN r.similarity ELSE 1 END), 0) AS nameScore
+WITH a, b, phone, emailScore, nameScore,
+     (0.2*phone + 0.4*emailScore + 0.4*nameScore) AS score
+RETURN a.Customer_Name, b.Customer_Name, phone, emailScore, nameScore, score
+ORDER BY score DESC
+// LIMIT 20;
+",15,,false
+see possible_dublicates,,"MATCH (a:customer)-[r]-(b:customer)
+WHERE elementId(a) < elementId(b)
+WITH a, b,
+     CASE WHEN exists((a)-[:MATCH_PHONE]->(b)) THEN 1.0 ELSE 0.0 END AS phone,
+     coalesce(1 - min(CASE WHEN type(r)='MATCH_EMAIL4' THEN r.similarity ELSE 1 END), 0) AS emailScore,
+     coalesce(1 - min(CASE WHEN type(r)='MATCH_NAME3' THEN r.similarity ELSE 1 END), 0) AS nameScore
+WITH a, b, (0.2*phone + 0.4*emailScore + 0.4*nameScore) AS score
+WHERE score >= 0.7
+MERGE (a)-[p:POSSIBLE_DUPLICATE4 {score: score}]->(b);
+
+",16,,false
+view possible dublicates,,MATCH p=()-[:POSSIBLE_DUPLICATE4]->() RETURN p ;,17,,false
+conical and TO_RESOLVE_FINAL,,"
+CALL gds.graph.project(
+  'er_graph',
+  'customer',
+  {POSSIBLE_DUPLICATE4: {orientation: 'UNDIRECTED'}}
+);
+
+CALL gds.wcc.stream('er_graph')
+YIELD nodeId, componentId
+WITH gds.util.asNode(nodeId) AS customer, componentId
+MERGE (canon:CanonicalCustomer12 {id: componentId})
+MERGE (customer)-[:RESOLVED_TO12]->(canon);
+
+// CALL gds.graph.drop('er_graph');
+CALL gds.graph.drop('er_graph', false) YIELD graphName;
+
+",18,,false
+view final OUTPUT,,"MATCH (canon:CanonicalCustomer12)<-[:RESOLVED_TO12]-(c:customer)
+RETURN 
+  canon.id AS CanonicalID,
+  count(c) AS Members,
+  collect(DISTINCT c.Customer_Name)[0..10] AS Names,
+  collect(DISTINCT c.email_norm)[0..5] AS Emails,
+  collect(DISTINCT c.phone_norm)[0..5] AS Phones
+ORDER BY Members DESC
+// LIMIT 20;
+",19,,false
+last dublicate1,,"MATCH (a:customer)-[r]-(b:customer)
+WHERE elementId(a) < elementId(b)
+WITH a, b,
+     CASE WHEN exists((a)-[:MATCH_PHONE]->(b)) THEN 1.0 ELSE 0.0 END AS phone,
+     coalesce(1 - min(CASE WHEN type(r)='MATCH_EMAIL4' THEN r.similarity ELSE 1 END), 0) AS emailScore,
+     coalesce(1 - min(CASE WHEN type(r)='MATCH_NAME3' THEN r.similarity ELSE 1 END), 0) AS nameScore
+WITH a, b, (0.2*phone + 0.4*emailScore + 0.4*nameScore) AS score
+WHERE score >= 0.75
+MERGE (a)-[p:POSSIBLE_DUPLICATE1 {score: score}]->(b);
+",20,,false
+dublicate edges,,"MATCH ()-[r:POSSIBLE_DUPLICATE1]->()
+RETURN count(r) AS duplicateEdges;
+",21,,false
+see possible_dublicate1,,"MATCH (a:customer)-[r:POSSIBLE_DUPLICATE1]->(b:customer)
+RETURN a.Customer_Name, b.Customer_Name, r.score
+ORDER BY r.score DESC
+LIMIT 20;
+",22,,false
+COUNT,,"MATCH (canon:CanonicalCustomer)<-[:RESOLVED_TO]-(c:customer)
+RETURN count(DISTINCT canon) AS CanonicalCount,
+       count(c) AS CustomerCount;
+",23,,false
+RESOLVED OUTPUT,,"MATCH (canon:CanonicalCustomer)<-[:RESOLVED_TO]-(c:customer)
+RETURN 
+  canon.id AS CanonicalID,
+  count(c) AS Members,
+  collect(DISTINCT c.Customer_Name)[0..10] AS Names,
+  collect(DISTINCT c.email_norm)[0..5] AS Emails,
+  collect(DISTINCT c.phone_norm)[0..5] AS Phones
+ORDER BY Members DESC
+// LIMIT 20;
+",24,,false
