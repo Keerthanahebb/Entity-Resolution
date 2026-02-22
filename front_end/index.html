@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Customer Resolution Dashboard</title>
+  <style>
+    body { font-family: Arial; padding: 20px; }
+    input, button { padding: 8px; margin: 5px; }
+    table { border-collapse: collapse; width: 100%; margin-top: 10px; }
+    th, td { border: 1px solid #ccc; padding: 6px; }
+    th { background: #f2f2f2; }
+    h2 { margin-top: 40px; }
+  </style>
+</head>
+<body>
+
+<h1>Customer Resolution Dashboard</h1>
+
+<!-- ================= SEARCH ================= -->
+<h2>🔍 Search Customers</h2>
+<input id="searchName" placeholder="Enter name..." />
+<button onclick="searchCustomers()">Search</button>
+
+<table id="customerTable">
+  <thead>
+    <tr>
+      <th>ID</th>
+      <th>Name</th>
+      <th>Email</th>
+      <th>Phone</th>
+    </tr>
+  </thead>
+  <tbody></tbody>
+</table>
+
+<!-- ================= DUPLICATES ================= -->
+<h2>🔗 Possible Duplicates</h2>
+<button onclick="loadDuplicates()">Load Duplicates</button>
+
+<table id="duplicateTable">
+  <thead>
+    <tr>
+      <th>A Name</th>
+      <th>B Name</th>
+      <th>Score</th>
+    </tr>
+  </thead>
+  <tbody></tbody>
+</table>
+
+<!-- ================= CANONICAL ================= -->
+<h2>📊 Canonical Groups</h2>
+<button onclick="loadCanonical()">Load Groups</button>
+
+<table id="canonicalTable">
+  <thead>
+    <tr>
+      <th>Canonical ID</th>
+      <th>Members</th>
+      <th>Names</th>
+      <th>Emails</th>
+      <th>Phones</th>
+    </tr>
+  </thead>
+  <tbody></tbody>
+</table>
+
+<script>
+const BASE = "http://localhost:5000";
+
+// ================= SEARCH =================
+async function searchCustomers() {
+  const name = document.getElementById("searchName").value;
+  const res = await fetch(`${BASE}/api/customers?name=${name}`);
+  const data = await res.json();
+
+  const tbody = document.querySelector("#customerTable tbody");
+  tbody.innerHTML = "";
+
+  data.forEach(c => {
+    tbody.innerHTML += `
+      <tr>
+        <td>${c.id}</td>
+        <td>${c.Customer_Name || ""}</td>
+        <td>${c.email_norm || ""}</td>
+        <td>${c.phone_norm || ""}</td>
+      </tr>`;
+  });
+}
+
+// ================= DUPLICATES =================
+async function loadDuplicates() {
+  const res = await fetch(`${BASE}/api/duplicates`);
+  const data = await res.json();
+
+  const tbody = document.querySelector("#duplicateTable tbody");
+  tbody.innerHTML = "";
+
+  data.forEach(d => {
+    tbody.innerHTML += `
+      <tr>
+        <td>${d.a.Customer_Name || ""}</td>
+        <td>${d.b.Customer_Name || ""}</td>
+        <td>${Number(d.score).toFixed(3)}</td>
+      </tr>`;
+  });
+}
+
+// ================= CANONICAL =================
+async function loadCanonical() {
+  const res = await fetch(`${BASE}/api/canonical-groups`);
+  const data = await res.json();
+
+  const tbody = document.querySelector("#canonicalTable tbody");
+  tbody.innerHTML = "";
+
+  data.forEach(g => {
+    tbody.innerHTML += `
+      <tr>
+        <td>${g.CanonicalID}</td>
+        <td>${g.Members}</td>
+        <td>${g.Names.join(", ")}</td>
+        <td>${g.Emails.join(", ")}</td>
+        <td>${g.Phones.join(", ")}</td>
+      </tr>`;
+  });
+}
+</script>
+
+</body>
+</html>

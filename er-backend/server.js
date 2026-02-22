@@ -44,19 +44,23 @@ app.get("/api/customers", async (req, res) => {
 // ===============================
 // 🔗 Get Possible Duplicates
 // ===============================
-app.get("/api/duplicates/:id", async (req, res) => {
+app.get("/api/duplicates", async (req, res) => {
   const session = driver.session();
 
   try {
     const result = await session.run(
+      // WHERE elementId(a) = $id
       `MATCH (a:customer)-[r:POSSIBLE_DUPLICATE4]->(b:customer)
-       WHERE elementId(a) = $id
+       WHERE a.name_norm contains "ravi"
        RETURN
          elementId(a) AS aId,
          elementId(b) AS bId,
          a, b, r.score
        ORDER BY r.score DESC
        LIMIT 20`,
+
+  
+       
       { id: req.params.id }
     );
 
@@ -66,6 +70,41 @@ app.get("/api/duplicates/:id", async (req, res) => {
       a: r.get("a").properties,
       b: r.get("b").properties,
       score: r.get("r.score")
+    }));
+
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  } finally {
+    await session.close();
+  }
+});
+
+
+// ===============================
+// 📊 Get Canonical Groups
+// ===============================
+app.get("/api/canonical-groups", async (req, res) => {
+  const session = driver.session({ database: "neo4j" });
+
+  try {
+    const result = await session.run(
+      `MATCH (canon:CanonicalCustomer12)<-[:RESOLVED_TO12]-(c:customer)
+       RETURN 
+         canon.id AS CanonicalID,
+         count(c) AS Members,
+         collect(DISTINCT c.Customer_Name)[0..10] AS Names,
+         collect(DISTINCT c.email_norm)[0..5] AS Emails,
+         collect(DISTINCT c.phone_norm)[0..5] AS Phones
+       ORDER BY Members DESC`
+    );
+
+    const data = result.records.map(r => ({
+      CanonicalID: r.get("CanonicalID"),
+      Members: r.get("Members").toNumber?.() ?? r.get("Members"),
+      Names: r.get("Names"),
+      Emails: r.get("Emails"),
+      Phones: r.get("Phones")
     }));
 
     res.json(data);
